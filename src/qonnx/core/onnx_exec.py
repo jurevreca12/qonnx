@@ -42,9 +42,16 @@ from qonnx.util.basic import (
     qonnx_make_model,
     sanitize_quant_values,
 )
+from onnxruntime_extensions import get_library_path
 
 
-def execute_node(node, context, graph, return_full_exec_context=False, opset_version=get_preferred_onnx_opset()):
+def execute_node(
+    node, 
+    context, 
+    graph, 
+    return_full_exec_context=False, 
+    opset_version=get_preferred_onnx_opset(),
+    use_deterministic_compute=False):
     """Executes a single node by using onnxruntime or with a custom function.
 
     Input/output provided via context."""
@@ -84,7 +91,10 @@ def execute_node(node, context, graph, return_full_exec_context=False, opset_ver
         for inp in node.input:
             input_dict[inp] = context[inp]
 
-        sess = rt.InferenceSession(node_model.SerializeToString())
+        so = rt.SessionOptions()
+        so.register_custom_ops_library(get_library_path())
+        so.use_deterministic_compute = use_deterministic_compute
+        sess = rt.InferenceSession(node_model.SerializeToString(), so)
         output_list = sess.run(None, input_dict)
 
         for output_ind in range(len(node.output)):
