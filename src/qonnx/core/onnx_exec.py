@@ -56,7 +56,7 @@ def execute_node(
 
     Input/output provided via context."""
 
-    if is_finn_op(node.domain):
+    if False: #is_finn_op(node.domain):
         ex_cu_node.execute_custom_node(node, context, graph, onnx_opset_version=opset_version)
     else:
         # onnxruntime unfortunately does not implement run_node as defined by ONNX,

@@ -31,7 +31,7 @@ from onnx import TensorProto, helper
 
 from qonnx.core.datatype import DataType
 from qonnx.custom_op.base import CustomOp
-
+from onnxruntime_extensions import onnx_op, PyCustomOpDef
 
 def min_int(signed: bool, narrow_range: bool, bit_width: int) -> int:
     """Compute the minimum integer representable by a given number of bits.
@@ -102,6 +102,17 @@ def max_int(signed: bool, narrow_range: bool, bit_width: int) -> int:
         value = (2 ** (bit_width - 1)) - 1
     return value
 
+@onnx_op(op_type="qonnx.custom_op.general::Quant",
+         inputs=[PyCustomOpDef.dt_float, PyCustomOpDef.dt_double, PyCustomOpDef.dt_int64, PyCustomOpDef.dt_int64],
+         outputs=[PyCustomOpDef.dt_float],
+         attrs={"narrow": PyCustomOpDef.dt_int64,
+                "rounding_mode": PyCustomOpDef.dt_string,
+                "signed": PyCustomOpDef.dt_int64})
+def quant_op(inp_tensor, scale, zeropt, bitwidth, **kwargs):
+    narrow = kwargs["narrow"]
+    rounding_mode = kwargs["rounding_mode"]
+    signed = kwargs["signed"]
+    return quant(inp_tensor, scale, zeropt, bitwidth, signed, narrow, rounding_mode)
 
 def quant(inp_tensor, scale, zeropt, bitwidth, signed, narrow, rounding_mode):
     # ToDo: Update this link, when the PR gets merged
@@ -163,6 +174,7 @@ def resolve_rounding_mode(mode_string):
         return round_half_down
     else:
         raise ValueError(f"Could not resolve rounding mode called: {normalized_mode_string}")
+
 
 
 class Quant(CustomOp):
