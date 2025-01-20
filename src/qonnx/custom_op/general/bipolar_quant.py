@@ -31,8 +31,12 @@ import onnx.helper as helper
 
 from qonnx.core.datatype import DataType
 from qonnx.custom_op.base import CustomOp
+from onnxruntime_extensions import onnx_op, PyCustomOpDef
 
-
+@onnx_op(op_type="qonnx.custom_op.general::BipolarQuant",
+         inputs=[PyCustomOpDef.dt_float, PyCustomOpDef.dt_double],
+         outputs=[PyCustomOpDef.dt_float]
+)
 def binary_quant(inp_tensor, scale):
     # ToDo: Update this link, when the PR gets merged
     # Port of IntQuant class from Brevitas: https://bit.ly/2S6qvZJ

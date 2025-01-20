@@ -32,7 +32,20 @@ import onnx.helper as helper
 from qonnx.core.datatype import DataType
 from qonnx.custom_op.base import CustomOp
 from qonnx.custom_op.general.quant import resolve_rounding_mode
+from onnxruntime_extensions import onnx_op, PyCustomOpDef
 
+@onnx_op(op_type="qonnx.custom_op.general::Trunc",
+         inputs=[PyCustomOpDef.dt_float,  # inp_tensor
+                 PyCustomOpDef.dt_double, # scale
+                 PyCustomOpDef.dt_int64,  # zeropt
+                 PyCustomOpDef.dt_int64,  # input_bit_width
+                 PyCustomOpDef.dt_int64,  # output_bit_width
+         ],
+         outputs=[PyCustomOpDef.dt_float],
+         attrs={"rounding_mode": PyCustomOpDef.dt_string})
+def trunc_op(inp_tensor, scale, zeropt, input_bit_width, output_bit_width, **kwargs):
+    rounding_mode = kwargs["rounding_mode"]
+    return trunc(inp_tensor, scale, zeropt, input_bit_width, output_bit_width, rounding_mode)
 
 def trunc(inp_tensor, scale, zeropt, input_bit_width, output_bit_width, rounding_mode):
     # Port of TruncIntQuant class from Brevitas: https://bit.ly/3wzIpTR

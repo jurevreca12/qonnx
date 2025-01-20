@@ -31,8 +31,12 @@ import onnx.helper as helper
 
 from qonnx.core.datatype import DataType
 from qonnx.custom_op.base import CustomOp
+from onnxruntime_extensions import onnx_op, PyCustomOpDef
 
-
+@onnx_op(op_type="qonnx.custom_op.general::XnorPopcountMatMul",
+         inputs=[PyCustomOpDef.dt_float, PyCustomOpDef.dt_float],
+         outputs=[PyCustomOpDef.dt_float]
+        )
 def xnorpopcountmatmul(inp0, inp1):
     """Simulates XNOR-popcount matrix multiplication as a regular bipolar
     matrix multiplication followed by some post processing."""
