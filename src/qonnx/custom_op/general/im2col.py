@@ -31,12 +31,84 @@ import numpy as np
 import qonnx.util.basic as util
 from qonnx.core.datatype import DataType
 from qonnx.custom_op.base import CustomOp
+from qonnx.transformation.list_attr_trans import string_to_list
+from onnxruntime_extensions import onnx_op, PyCustomOpDef
+
 
 # adapted from A. Karpathy's CS231 im2col code
 # utilities to generate a patch matrix from a multichannel image
 # of shape (batches, channels, height, width)
 # note: the spatial dimensions can be set to 1 to indicate
 # a dummy dimension (e.g. 1D convs represented as 2D)
+
+@onnx_op(op_type="qonnx.custom_op.general::Im2Col",
+         inputs=[PyCustomOpDef.dt_float],
+         outputs=[PyCustomOpDef.dt_float],
+         attrs={"stride": PyCustomOpDef.dt_string,
+                "kernel_size": PyCustomOpDef.dt_string,
+                "input_shape": PyCustomOpDef.dt_string,
+                "pad_amount": PyCustomOpDef.dt_string,
+                "pad_value": PyCustomOpDef.dt_int64,
+                "depthwise": PyCustomOpDef.dt_int64,
+                "dilations": PyCustomOpDef.dt_string
+                })
+def im2col_op(x, **kwargs):
+    k_h, k_w = string_to_list(kwargs["kernel_size"])  # Assumption: Height x Width
+    stride_h, stride_w = string_to_list(kwargs["stride"])
+    pad = string_to_list(kwargs["pad_amount"])
+    pad_h = pad[0] + pad[2]
+    pad_w = pad[1] + pad[3]
+    pad_val = kwargs["pad_value"]
+    dilation_h, dilation_w = string_to_list(kwargs["dilations"])
+
+    # check that input is NHWC
+    assert x.ndim == 4, "Unexpected number of input dims for Im2Col"
+    n, h, w, c = x.shape
+
+    # check that kernel tensor also respects any existing dummy dimensions
+    if h == 1:
+        kernel_1d = k_h == 1
+        pad_1d = pad_h == 0
+        assert (
+            kernel_1d and pad_1d
+        ), "Unexpected kernel shape and padding for input image\
+            of dimensions (N, 1, W, C)"
+    if w == 1:
+        kernel_1d = k_w == 1
+        pad_1d = pad_w == 0
+        assert (
+            kernel_1d and pad_1d
+        ), "Unexpected kernel shape and padding for input image\
+            of dimensions (N, H, 1, C)"
+
+    out_dim_h = compute_conv_output_dim(h, k_h, stride_h, pad_h, dilation_h)
+    out_dim_w = compute_conv_output_dim(w, k_w, stride_w, pad_w, dilation_w)
+    # internally convert input to NCHW
+    x = x.transpose(0, 3, 1, 2)
+    # call NCHW im2col implementation
+    ret = im2col_indices_nchw(
+        x,
+        h,
+        w,
+        k_h,
+        k_w,
+        pad,
+        stride_h,
+        stride_w,
+        pad_val=pad_val,
+        dilation_h=dilation_h,
+        dilation_w=dilation_w,
+    )
+    # result shape is (k_H*k_W*N, out_dim_H*out_dim_W), convert to NCHW
+    ret = ret.reshape(n, c, k_h, k_w, out_dim_h, out_dim_w)
+    # (N=0,C=1,kh=2,kw=3,H=4,W=5) -> (N=0,H=4,W=5,kh=2,kw=3,C=1)
+    ret = ret.transpose(0, 4, 5, 2, 3, 1)
+    ret = ret.reshape(n, out_dim_h, out_dim_w, k_h * k_w * c)
+
+    # ret = ret.reshape(N, k * k * C, out_dim, out_dim)
+    # convert output back to NHWC
+    # ret = ret.transpose(0, 2, 3, 1)
+    return ret
 
 
 def compute_conv_output_dim(ifm_dim, k, stride, total_pad=0, dilation=1):

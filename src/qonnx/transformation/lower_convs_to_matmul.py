@@ -32,6 +32,7 @@ from onnx import TensorProto, helper
 
 from qonnx.transformation.base import Transformation
 from qonnx.transformation.extract_conv_bias import ExtractBiasFromConv
+from qonnx.transformation.list_attr_trans import list_to_string
 from qonnx.util.basic import auto_pad_to_explicit_padding, get_by_name
 
 
@@ -166,12 +167,13 @@ class LowerConvsToMatMul(Transformation):
                     [inp_trans_out],
                     [im2col_out],
                     domain="qonnx.custom_op.general",
-                    stride=[stride_h, stride_w],
-                    kernel_size=[k_h, k_w],
-                    pad_amount=pad,
-                    input_shape="(1,{},{},{})".format(ifm_dim_h, ifm_dim_w, ifm_ch),
+                    stride=list_to_string([stride_h, stride_w]),
+                    kernel_size=list_to_string([k_h, k_w]),
+                    pad_amount=list_to_string(np.array(pad).tolist()),
+                    pad_value=0,
+                    input_shape=list_to_string([1, ifm_dim_h, ifm_dim_w, ifm_ch]),
                     depthwise=dw,
-                    dilations=dilation,
+                    dilations=list_to_string(np.array(dilation).tolist()),
                 )
                 nodes_to_insert.append(im2col_node)
 
