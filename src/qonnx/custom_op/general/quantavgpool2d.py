@@ -25,15 +25,84 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import math
 import numpy as np
 import onnxruntime as rt
+import onnx
 from onnx import TensorProto, helper
+from onnxruntime_extensions import onnx_op, PyCustomOpDef
 
 from qonnx.core.datatype import DataType
 from qonnx.custom_op.base import CustomOp
 from qonnx.custom_op.general.maxpoolnhwc import compute_pool_output_dim
-from qonnx.util.basic import qonnx_make_model
+from qonnx.util.basic import qonnx_make_model, get_preferred_onnx_opset
+
+
+def get_accum_size(ibits, k):
+    max_value = 2**ibits - 1
+    max_value = max_value * k * k
+    max_bit_width = int(max_value).bit_length()
+    return max_bit_width
+
+def get_shifts(obits, ibits, k):
+    shift_bits = get_accum_size(ibits, k) - obits
+    shift_bits = shift_bits if shift_bits >= 0 else 0
+    return shift_bits
+
+
+@onnx_op(op_type="qonnx.custom_op.general::QuantAvgPool2d",
+         inputs=[PyCustomOpDef.dt_float],
+         outputs=[PyCustomOpDef.dt_float],
+         attrs={"stride": PyCustomOpDef.dt_int64,
+                "kernel": PyCustomOpDef.dt_int64,
+                "ibits": PyCustomOpDef.dt_int64,
+                "obits": PyCustomOpDef.dt_int64,
+                "signed": PyCustomOpDef.dt_int64,
+                "data_layout": PyCustomOpDef.dt_string
+                })
+def quant_avgpool2d_op(inp_values, **kwargs):
+    k = kwargs["kernel"]
+    s = kwargs["stride"]
+    obits = kwargs["obits"]
+    ibits = kwargs["ibits"]
+
+    if kwargs["data_layout"] == "NHWC":
+        inp_values = inp_values.transpose(0, 3, 1, 2)
+    ishape = inp_values.shape
+    ishape_n, ishape_c, ishape_h, ishape_w = ishape
+    oshape_h = math.floor(((ishape_h - (k - 1) - 1) / s) + 1)  # see torch/onnx op docs
+    oshape_w = math.floor(((ishape_w - (k - 1) - 1) / s) + 1)
+    oshape = (ishape_n, ishape_c, oshape_h, oshape_w)
+    input_tmp = helper.make_tensor_value_info("input_tmp", TensorProto.FLOAT, ishape)
+    output_tmp = helper.make_tensor_value_info("output_tmp", TensorProto.FLOAT, oshape)
+    node_avgpool = helper.make_node(
+        "AveragePool",
+        inputs=["input_tmp"],
+        outputs=["output_tmp"],
+        kernel_shape=[k, k],
+        strides=[s, s],
+    )
+    graph_avgpool = helper.make_graph(
+        nodes=[node_avgpool],
+        name="single-avgpool-exec",
+        inputs=[input_tmp],
+        outputs=[output_tmp],
+    )
+    opset_version = get_preferred_onnx_opset()
+    opset_imports = [helper.make_opsetid("", opset_version)]
+    onnx_kwargs = {"opset_imports": opset_imports}
+    model_avgpool = qonnx_make_model(graph_avgpool, **onnx_kwargs)
+    idict = {"input_tmp": inp_values}
+    onnx.save(model_avgpool, "avgpoltest.onnx")
+    sess = rt.InferenceSession(model_avgpool.SerializeToString())
+    result_temp = sess.run(None, idict)
+    # remove scaling introduced by average
+    result_temp = np.round(result_temp[0] * (k * k))
+
+    result = np.right_shift(result_temp.astype(int), get_shifts(obits, ibits, k))
+    if kwargs["data_layout"] == "NHWC":
+        result = result.transpose(0, 2, 3, 1)
+    return result.astype(np.float32)
 
 
 class QuantAvgPool2d(CustomOp):
